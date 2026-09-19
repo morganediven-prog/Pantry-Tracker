@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pantry &amp; Fridge Tracker</title>
+<style>
+  :root {
+    --bg: #f7f5f0;
+    --card: #ffffff;
+    --text: #2a2622;
+    --muted: #7a736a;
+    --border: #e6e1d8;
+    --accent: #3f7d5c;
+    --accent-dark: #2e5f45;
+    --danger: #b3462c;
+    --warn: #c98a1f;
+    --ok: #3f7d5c;
+    --chip-bg: #efeae0;
+    --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1c1a17; --card: #262320; --text: #ece7de; --muted: #a49b8d;
+      --border: #3a352e; --accent: #5fae82; --accent-dark: #7cc79a;
+      --danger: #e08066; --warn: #e0ab52; --ok: #5fae82; --chip-bg: #322e28;
+      --shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1c1a17; --card: #262320; --text: #ece7de; --muted: #a49b8d;
+    --border: #3a352e; --accent: #5fae82; --accent-dark: #7cc79a;
+    --danger: #e08066; --warn: #e0ab52; --ok: #5fae82; --chip-bg: #322e28;
+    --shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    background: var(--bg); color: var(--text); min-height: 100vh; padding: 16px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  header { margin-bottom: 18px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 0.9rem; }
+  .account { text-align: right; font-size: 0.8rem; color: var(--muted); }
+  .account button { padding: 5px 10px; font-size: 0.78rem; margin-top: 4px; }
+
+  .toolbar { display: flex; gap: 8px; margin: 16px 0; flex-wrap: wrap; }
+  button {
+    font-family: inherit; cursor: pointer; border: 1px solid var(--border);
+    background: var(--card); color: var(--text); border-radius: 10px;
+    padding: 10px 14px; font-size: 0.9rem; transition: transform 0.08s ease, background 0.15s ease;
+  }
+  button:active { transform: scale(0.97); }
+  .btn-primary { background: var(--accent); color: white; border-color: var(--accent); font-weight: 600; }
+  .btn-primary:hover { background: var(--accent-dark); }
+  .btn-mic {
+    background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .btn-mic.listening { background: var(--danger); border-color: var(--danger); animation: pulse 1.2s infinite; }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(179,70,44,0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(179,70,44,0); }
+  }
+
+  .filters { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 14px; padding-bottom: 2px; }
+  .chip {
+    flex-shrink: 0; padding: 7px 13px; border-radius: 999px; background: var(--chip-bg);
+    color: var(--muted); font-size: 0.85rem; cursor: pointer; border: 1px solid transparent; white-space: nowrap;
+  }
+  .chip.active { background: var(--accent); color: white; }
+
+  .list { display: flex; flex-direction: column; gap: 8px; }
+  .item {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 12px 14px; display: flex; align-items: center; gap: 12px; box-shadow: var(--shadow);
+  }
+  .item .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .dot.ok { background: var(--ok); }
+  .dot.warn { background: var(--warn); }
+  .dot.danger { background: var(--danger); }
+  .dot.none { background: var(--border); }
+
+  .item .info { flex: 1; min-width: 0; }
+  .item .name { font-weight: 600; font-size: 0.98rem; }
+  .item .meta { font-size: 0.8rem; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+  .item .cat-tag { font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; background: var(--chip-bg); color: var(--muted); }
+  .item .exp-text { font-weight: 600; }
+  .exp-text.warn { color: var(--warn); }
+  .exp-text.danger { color: var(--danger); }
+  .exp-text.ok { color: var(--ok); }
+
+  .item .del { background: none; border: none; color: var(--muted); font-size: 1.1rem; padding: 4px 8px; flex-shrink: 0; }
+  .item .del:hover { color: var(--danger); }
+
+  .empty { text-align: center; color: var(--muted); padding: 40px 20px; font-size: 0.9rem; }
+
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+    display: flex; align-items: flex-end; justify-content: center; z-index: 50;
+  }
+  @media (min-width: 600px) { .overlay { align-items: center; } }
+  .sheet {
+    background: var(--card); width: 100%; max-width: 480px; border-radius: 16px 16px 0 0;
+    padding: 20px; max-height: 85vh; overflow-y: auto;
+  }
+  @media (min-width: 600px) { .sheet { border-radius: 16px; } }
+  .sheet h2 { margin: 0 0 14px; font-size: 1.15rem; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+  .field input, .field select {
+    width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font-size: 0.95rem; font-family: inherit;
+  }
+  .quick-days { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .quick-days button { padding: 6px 10px; font-size: 0.8rem; }
+  .sheet-actions { display: flex; gap: 8px; margin-top: 16px; }
+  .sheet-actions button { flex: 1; }
+
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--accent-dark); color: white; padding: 10px 18px; border-radius: 999px;
+    font-size: 0.85rem; box-shadow: var(--shadow); z-index: 100; opacity: 0;
+    transition: opacity 0.25s ease; pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+
+  .scan-sheet { background: var(--card); width: 100%; max-width: 480px; border-radius: 16px; padding: 18px; text-align: center; }
+  .scan-video-wrap {
+    position: relative; width: 100%; aspect-ratio: 4/3; background: #000;
+    border-radius: 12px; overflow: hidden; margin: 10px 0;
+  }
+  .scan-video-wrap video { width: 100%; height: 100%; object-fit: cover; }
+  .scan-guide { position: absolute; inset: 20% 10%; border: 2px solid rgba(255,255,255,0.75); border-radius: 10px; pointer-events: none; }
+  .scan-status { font-size: 0.85rem; color: var(--muted); margin-bottom: 4px; }
+  .barcode-tag { font-size: 0.72rem; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  /* sign-in screen */
+  .signin-screen {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 80px 20px; gap: 14px;
+  }
+  .signin-screen .icon { font-size: 2.6rem; }
+  .signin-screen p { color: var(--muted); font-size: 0.9rem; max-width: 320px; }
+  .btn-google {
+    display: flex; align-items: center; gap: 10px; background: var(--card);
+    border: 1px solid var(--border); padding: 11px 20px; font-weight: 600; border-radius: 10px;
+  }
+  #configWarning {
+    display: none; background: var(--chip-bg); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 14px; font-size: 0.82rem; color: var(--muted);
+    margin-top: 16px; max-width: 380px; line-height: 1.4;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>🥫 Pantry &amp; Fridge Tracker</h1>
+      <div class="sub" id="subhead">Checking sign-in…</div>
+    </div>
+    <div class="account" id="accountBox" style="display:none;">
+      <div id="accountEmail"></div>
+      <button id="signOutBtn">Sign out</button>
+    </div>
+  </header>
+
+  <div class="signin-screen" id="signinScreen" style="display:none;">
+    <div class="icon">🥫</div>
+    <p>Sign in with Google to sync your pantry list across every device.</p>
+    <button class="btn-google" id="signInBtn">Sign in with Google</button>
+    <div id="configWarning"></div>
+  </div>
+
+  <div id="appScreen" style="display:none;">
+    <div class="toolbar">
+      <button class="btn-mic" id="micBtn">🎤 Add by voice</button>
+      <button class="btn-mic" id="scanBtn">📷 Scan barcode</button>
+      <button class="btn-primary" id="addBtn">+ Add item</button>
+    </div>
+
+    <div class="filters" id="filters"></div>
+
+    <div class="list" id="list"></div>
+    <div class="empty" id="emptyState" style="display:none;">Nothing here yet — add your first item above.</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!--
+  ============================================================================
+  FIREBASE SETUP — paste your config below, between the marked lines.
+  Get it from: Firebase Console > Project settings (gear icon) > General tab
+  > "Your apps" > Web app (</>) icon > register an app if you haven't yet.
+  ============================================================================
+-->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+  import {
+    getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut
+  } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
+  import {
+    getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query
+  } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+
+  // ======================= PASTE YOUR CONFIG HERE =======================
+  const firebaseConfig = {
+    apiKey: "AIzaSyBx0PxYAaKq_w2QQnvCnr343qv2PnifT7Q",
+    authDomain: "pantry-tracker-65115.firebaseapp.com",
+    projectId: "pantry-tracker-65115",
+    storageBucket: "pantry-tracker-65115.firebasestorage.app",
+    messagingSenderId: "906462786458",
+    appId: "1:906462786458:web:2f5e55499e58a625fd0023"
+  };
+  // ========================================================================
+
+  const configLooksReal = firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith("YOUR_");
+
+  if (!configLooksReal) {
+    const warn = document.getElementById("configWarning");
+    warn.style.display = "block";
+    warn.textContent = "Firebase isn't configured yet — open this file and paste your project's config into the script near the bottom (look for \"PASTE YOUR CONFIG HERE\").";
+    document.getElementById("subhead").textContent = "Not configured";
+    document.getElementById("signinScreen").style.display = "flex";
+    document.getElementById("signInBtn").disabled = true;
+  } else {
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    window.__fb = {
+      auth, db, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut,
+      collection, addDoc, deleteDoc, doc, onSnapshot, query
+    };
+    window.dispatchEvent(new Event("firebase-ready"));
+  }
+</script>
+
+<script>
+(function() {
+  "use strict";
+
+  const CATEGORIES = ["Pantry", "Fridge", "Freezer", "Produce", "Leftovers"];
+  const CATEGORY_ICON = { Pantry: "🥫", Fridge: "🧊", Freezer: "❄️", Produce: "🥬", Leftovers: "🍱" };
+
+  let items = [];
+  let activeFilter = "All";
+  let currentUser = null;
+  let unsubscribeItems = null;
+
+  const $ = (sel) => document.querySelector(sel);
+  const listEl = $("#list");
+  const emptyEl = $("#emptyState");
+  const filtersEl = $("#filters");
+  const subhead = $("#subhead");
+  const toastEl = $("#toast");
+  const signinScreen = $("#signinScreen");
+  const appScreen = $("#appScreen");
+  const accountBox = $("#accountBox");
+  const accountEmail = $("#accountEmail");
+
+  function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add("show");
+    setTimeout(() => toastEl.classList.remove("show"), 1800);
+  }
+
+  // ---------- Firebase bridge ----------
+  function whenFirebaseReady(cb) {
+    if (window.__fb) { cb(window.__fb); return; }
+    window.addEventListener("firebase-ready", () => cb(window.__fb), { once: true });
+  }
+
+  whenFirebaseReady((fb) => {
+    fb.onAuthStateChanged(fb.auth, (user) => {
+      currentUser = user;
+      if (unsubscribeItems) { unsubscribeItems(); unsubscribeItems = null; }
+
+      if (user) {
+        signinScreen.style.display = "none";
+        appScreen.style.display = "block";
+        accountBox.style.display = "block";
+        accountEmail.textContent = user.email || user.displayName || "Signed in";
+        subhead.textContent = "Synced to your Firebase account";
+
+        const itemsCol = fb.collection(fb.db, "users", user.uid, "items");
+        unsubscribeItems = fb.onSnapshot(fb.query(itemsCol), (snap) => {
+          items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          render();
+        }, (err) => {
+          console.error("Firestore listen error:", err);
+          toast("Couldn't load your list — check Firestore rules");
+        });
+      } else {
+        signinScreen.style.display = "flex";
+        appScreen.style.display = "none";
+        accountBox.style.display = "none";
+        subhead.textContent = "Not signed in";
+        items = [];
+      }
+    });
+
+    $("#signInBtn").onclick = () => {
+      const provider = new fb.GoogleAuthProvider();
+      fb.signInWithPopup(fb.auth, provider).catch((err) => {
+        console.error(err);
+        toast("Sign-in failed — see console for details");
+      });
+    };
+    $("#signOutBtn").onclick = () => { fb.signOut(fb.auth); };
+  });
+
+  async function addItem(item) {
+    if (!currentUser) { toast("Sign in first"); return; }
+    const fb = window.__fb;
+    const withMeta = Object.assign({ addedAt: Date.now() }, item);
+    try {
+      const itemsCol = fb.collection(fb.db, "users", currentUser.uid, "items");
+      await fb.addDoc(itemsCol, withMeta);
+    } catch (e) {
+      console.error(e);
+      toast("Couldn't save — check your connection or Firestore rules");
+    }
+  }
+
+  async function deleteItem(id) {
+    if (!currentUser) return;
+    const fb = window.__fb;
+    try {
+      await fb.deleteDoc(fb.doc(fb.db, "users", currentUser.uid, "items", id));
+    } catch (e) {
+      console.error(e);
+      toast("Couldn't remove item");
+    }
+  }
+
+  // ---------- date helpers ----------
+  function daysUntil(dateStr) {
+    if (!dateStr) return null;
+    const target = new Date(dateStr + "T00:00:00");
+    const now = new Date();
+    now.setHours(0,0,0,0);
+    return Math.round((target - now) / 86400000);
+  }
+  function fmtExpiry(dateStr) {
+    const d = daysUntil(dateStr);
+    if (d === null) return { text: "No expiry set", cls: "none" };
+    if (d < 0) return { text: `Expired ${Math.abs(d)}d ago`, cls: "danger" };
+    if (d === 0) return { text: "Expires today", cls: "danger" };
+    if (d === 1) return { text: "Expires tomorrow", cls: "danger" };
+    if (d <= 7) return { text: `Expires in ${d}d`, cls: "warn" };
+    return { text: `Expires in ${d}d`, cls: "ok" };
+  }
+  function dotClassFor(dateStr) {
+    const d = daysUntil(dateStr);
+    if (d === null) return "none";
+    if (d <= 1) return "danger";
+    if (d <= 3) return "warn";
+    return "ok";
+  }
+  function todayPlus(n) {
+    const d = new Date();
+    d.setDate(d.getDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  // ---------- render ----------
+  function render() {
+    filtersEl.innerHTML = "";
+    ["All"].concat(CATEGORIES).forEach(cat => {
+      const chip = document.createElement("div");
+      chip.className = "chip" + (activeFilter === cat ? " active" : "");
+      chip.textContent = cat === "All" ? "All" : `${CATEGORY_ICON[cat] || ""} ${cat}`;
+      chip.onclick = () => { activeFilter = cat; render(); };
+      filtersEl.appendChild(chip);
+    });
+
+    let shown = items.slice();
+    if (activeFilter !== "All") shown = shown.filter(i => i.category === activeFilter);
+
+    shown.sort((a, b) => {
+      const da = a.expiresOn ? daysUntil(a.expiresOn) : Infinity;
+      const db_ = b.expiresOn ? daysUntil(b.expiresOn) : Infinity;
+      return da - db_;
+    });
+
+    listEl.innerHTML = "";
+    emptyEl.style.display = shown.length === 0 ? "block" : "none";
+
+    shown.forEach(it => {
+      const row = document.createElement("div");
+      row.className = "item";
+      const exp = fmtExpiry(it.expiresOn);
+      row.innerHTML = `
+        <div class="dot ${dotClassFor(it.expiresOn)}"></div>
+        <div class="info">
+          <div class="name">${escapeHtml(it.name)}${it.quantity ? ` <span style="color:var(--muted); font-weight:400;">× ${escapeHtml(it.quantity)}</span>` : ""}</div>
+          <div class="meta">
+            <span class="cat-tag">${CATEGORY_ICON[it.category] || ""} ${escapeHtml(it.category)}</span>
+            <span class="exp-text ${exp.cls}">${exp.text}</span>
+          </div>
+        </div>
+        <button class="del" title="Remove" data-id="${it.id}">✕</button>
+      `;
+      row.querySelector(".del").onclick = () => deleteItem(it.id);
+      listEl.appendChild(row);
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  }
+
+  // ---------- add sheet ----------
+  function openAddSheet(prefill) {
+    const overlay = document.createElement("div");
+    overlay.className = "overlay";
+    overlay.innerHTML = `
+      <div class="sheet">
+        <h2>Add item</h2>
+        <div class="field">
+          <label>Name</label>
+          <input type="text" id="f_name" placeholder="e.g. Milk, Leftover chili, Apples">
+          <div class="barcode-tag" id="f_barcode_tag" style="display:none; margin-top:4px;"></div>
+        </div>
+        <div class="field">
+          <label>Category</label>
+          <select id="f_cat">
+            ${CATEGORIES.map(c => `<option value="${c}">${CATEGORY_ICON[c]} ${c}</option>`).join("")}
+          </select>
+        </div>
+        <div class="field">
+          <label>Quantity (optional)</label>
+          <input type="text" id="f_qty" placeholder="e.g. 2, 1 gallon, 3 servings">
+        </div>
+        <div class="field">
+          <label>Expiration date (optional)</label>
+          <input type="date" id="f_exp">
+          <div class="quick-days">
+            <button type="button" data-d="3">+3 days</button>
+            <button type="button" data-d="5">+5 days</button>
+            <button type="button" data-d="7">+7 days</button>
+            <button type="button" data-d="14">+2 weeks</button>
+            <button type="button" data-d="30">+1 month</button>
+          </div>
+        </div>
+        <div class="sheet-actions">
+          <button id="f_cancel">Cancel</button>
+          <button class="btn-primary" id="f_save">Save</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const nameInput = overlay.querySelector("#f_name");
+    const catSelect = overlay.querySelector("#f_cat");
+    const qtyInput = overlay.querySelector("#f_qty");
+    const expInput = overlay.querySelector("#f_exp");
+    const barcodeTag = overlay.querySelector("#f_barcode_tag");
+    let pendingBarcode = null;
+
+    if (prefill) {
+      nameInput.value = prefill.name || "";
+      if (prefill.category) catSelect.value = prefill.category;
+      if (prefill.quantity) qtyInput.value = prefill.quantity;
+      if (prefill.expiresOn) expInput.value = prefill.expiresOn;
+      if (prefill.barcode) {
+        pendingBarcode = prefill.barcode;
+        barcodeTag.style.display = "block";
+        barcodeTag.textContent = prefill.nameFromLookup
+          ? `Scanned: ${prefill.barcode} — matched automatically, double-check the name`
+          : `Scanned: ${prefill.barcode} — couldn't auto-match, enter the name manually`;
+      }
+    }
+
+    overlay.querySelectorAll(".quick-days button").forEach(btn => {
+      btn.onclick = () => { expInput.value = todayPlus(parseInt(btn.dataset.d, 10)); };
+    });
+
+    overlay.querySelector("#f_cancel").onclick = () => overlay.remove();
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+
+    overlay.querySelector("#f_save").onclick = () => {
+      const name = nameInput.value.trim();
+      if (!name) { nameInput.focus(); return; }
+      addItem({
+        name,
+        category: catSelect.value,
+        quantity: qtyInput.value.trim(),
+        expiresOn: expInput.value || null,
+        barcode: pendingBarcode || null
+      });
+      overlay.remove();
+      toast(`Added ${name}`);
+    };
+
+    setTimeout(() => nameInput.focus(), 50);
+  }
+
+  $("#addBtn").onclick = () => openAddSheet();
+
+  // ---------- barcode scanning ----------
+  const scanBtn = $("#scanBtn");
+  const hasBarcodeDetector = "BarcodeDetector" in window;
+
+  async function lookupProduct(code) {
+    // Self-hosted (GitHub Pages etc.) has no cross-origin restriction, so this
+    // lookup against the free Open Food Facts database works here.
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeout);
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data && data.product && data.product.product_name) {
+        return data.product.product_name;
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function openScanOverlay() {
+    const overlay = document.createElement("div");
+    overlay.className = "overlay";
+    overlay.innerHTML = `
+      <div class="scan-sheet">
+        <h2 style="margin:0 0 4px; font-size:1.1rem;">Scan a barcode</h2>
+        <div class="scan-status" id="scanStatus">Point your camera at the barcode…</div>
+        <div class="scan-video-wrap">
+          <video id="scanVideo" autoplay playsinline muted></video>
+          <div class="scan-guide"></div>
+        </div>
+        <button id="scanCancel">Cancel</button>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const video = overlay.querySelector("#scanVideo");
+    const statusEl = overlay.querySelector("#scanStatus");
+    let stream = null;
+    let stopped = false;
+
+    function cleanup() {
+      stopped = true;
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      overlay.remove();
+    }
+    overlay.querySelector("#scanCancel").onclick = cleanup;
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) cleanup(); });
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+      .then(async (s) => {
+        stream = s;
+        video.srcObject = s;
+        const detector = new window.BarcodeDetector({
+          formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "qr_code"]
+        });
+
+        const loop = async () => {
+          if (stopped) return;
+          try {
+            const codes = await detector.detect(video);
+            if (codes && codes.length > 0) {
+              const value = codes[0].rawValue;
+              stopped = true;
+              statusEl.textContent = "Got it — looking up product…";
+              stream.getTracks().forEach(t => t.stop());
+              const productName = await lookupProduct(value);
+              overlay.remove();
+              openAddSheet({
+                name: productName || "",
+                barcode: value,
+                nameFromLookup: !!productName
+              });
+              return;
+            }
+          } catch (e) { /* detection miss, keep looping */ }
+          requestAnimationFrame(loop);
+        };
+        requestAnimationFrame(loop);
+      })
+      .catch((err) => {
+        statusEl.textContent = err.name === "NotAllowedError"
+          ? "Camera access denied"
+          : "Couldn't access the camera";
+        setTimeout(cleanup, 1500);
+      });
+  }
+
+  scanBtn.onclick = () => {
+    if (!hasBarcodeDetector) {
+      toast("Barcode scanning isn't supported in this browser — try Chrome on Android or desktop");
+      return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast("Camera access isn't available in this browser");
+      return;
+    }
+    openScanOverlay();
+  };
+
+  // ---------- voice input ----------
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const micBtn = $("#micBtn");
+
+  function parseSpeech(text) {
+    let t = text.toLowerCase().trim();
+    t = t.replace(/^(add|please add|put|there's|i have)\s+/i, "");
+
+    let category = null;
+    for (const cat of CATEGORIES) {
+      const re = new RegExp("\\bto\\s+(the\\s+)?" + cat.toLowerCase() + "\\b|\\bin\\s+(the\\s+)?" + cat.toLowerCase() + "\\b|\\b" + cat.toLowerCase() + "\\b");
+      if (re.test(t)) { category = cat; break; }
+    }
+    if (!category) {
+      if (/\bfreez/i.test(t)) category = "Freezer";
+      else if (/\bfridge|refrigerat/i.test(t)) category = "Fridge";
+      else if (/\bleftover/i.test(t)) category = "Leftovers";
+      else if (/\bproduce|vegetable|fruit/i.test(t)) category = "Produce";
+      else if (/\bpantry|cupboard|shelf/i.test(t)) category = "Pantry";
+    }
+
+    let expiresOn = null;
+    let daysMatch = t.match(/expir\w*\s+(in|on)?\s*(\d+)\s*day/i) || t.match(/(\d+)\s*day/i);
+    if (daysMatch) {
+      const n = parseInt(daysMatch[2] || daysMatch[1], 10);
+      if (!isNaN(n)) expiresOn = todayPlus(n);
+    }
+    const weekMatch = t.match(/(\d+)\s*week/i);
+    if (!expiresOn && weekMatch) {
+      expiresOn = todayPlus(parseInt(weekMatch[1], 10) * 7);
+    }
+    if (!expiresOn && /\btomorrow\b/i.test(t)) expiresOn = todayPlus(1);
+    if (!expiresOn && /\btoday\b/i.test(t)) expiresOn = todayPlus(0);
+
+    let name = t
+      .replace(/\b(expir\w*\s+(in|on)?\s*\d+\s*(day|week)s?)\b.*$/i, "")
+      .replace(/\b(to|in)\s+(the\s+)?(pantry|fridge|freezer|produce|leftovers)\b.*$/i, "")
+      .replace(/\btomorrow\b.*$/i, "")
+      .replace(/\btoday\b.*$/i, "")
+      .trim();
+    name = name.replace(/[.,!]+$/, "").trim();
+    if (name) name = name.charAt(0).toUpperCase() + name.slice(1);
+
+    return { name: name || text, category: category || "Pantry", expiresOn };
+  }
+
+  if (!SpeechRecognition) {
+    micBtn.title = "Voice input isn't supported in this browser — try Chrome, Edge, or Safari on iOS.";
+  }
+
+  micBtn.onclick = () => {
+    if (!SpeechRecognition) {
+      toast("Voice input isn't supported in this browser");
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    micBtn.classList.add("listening");
+    micBtn.textContent = "🎙️ Listening…";
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      const parsed = parseSpeech(transcript);
+      openAddSheet(parsed);
+    };
+    recognition.onerror = (event) => {
+      toast(event.error === "not-allowed" ? "Microphone access denied" : "Didn't catch that — try again");
+    };
+    recognition.onend = () => {
+      micBtn.classList.remove("listening");
+      micBtn.textContent = "🎤 Add by voice";
+    };
+    try { recognition.start(); } catch (e) { micBtn.classList.remove("listening"); micBtn.textContent = "🎤 Add by voice"; }
+  };
+})();
+</script>
+</body>
+</html>
