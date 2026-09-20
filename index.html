@@ -280,6 +280,10 @@
   let currentUser = null;
   let unsubscribeItems = null;
 
+  // Only these Google accounts can view/edit the shared list. This is just for
+  // a clean UI message — the real enforcement is in the Firestore security rules.
+  const ALLOWED_EMAILS = ["morgane.diven@gmail.com", "cdiven@gmail.com"];
+
   const $ = (sel) => document.querySelector(sel);
   const listEl = $("#list");
   const emptyEl = $("#emptyState");
@@ -308,14 +312,24 @@
       currentUser = user;
       if (unsubscribeItems) { unsubscribeItems(); unsubscribeItems = null; }
 
+      if (user && !ALLOWED_EMAILS.includes(user.email)) {
+        fb.signOut(fb.auth);
+        signinScreen.style.display = "flex";
+        appScreen.style.display = "none";
+        accountBox.style.display = "none";
+        subhead.textContent = "Not authorized";
+        toast("This pantry list is private to invited family members only");
+        return;
+      }
+
       if (user) {
         signinScreen.style.display = "none";
         appScreen.style.display = "block";
         accountBox.style.display = "block";
         accountEmail.textContent = user.email || user.displayName || "Signed in";
-        subhead.textContent = "Synced to your Firebase account";
+        subhead.textContent = "Shared family list — synced to Firebase";
 
-        const itemsCol = fb.collection(fb.db, "users", user.uid, "items");
+        const itemsCol = fb.collection(fb.db, "households", "pantry", "items");
         unsubscribeItems = fb.onSnapshot(fb.query(itemsCol), (snap) => {
           items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
           render();
@@ -345,9 +359,9 @@
   async function addItem(item) {
     if (!currentUser) { toast("Sign in first"); return; }
     const fb = window.__fb;
-    const withMeta = Object.assign({ addedAt: Date.now() }, item);
+    const withMeta = Object.assign({ addedAt: Date.now(), addedBy: currentUser.email }, item);
     try {
-      const itemsCol = fb.collection(fb.db, "users", currentUser.uid, "items");
+      const itemsCol = fb.collection(fb.db, "households", "pantry", "items");
       await fb.addDoc(itemsCol, withMeta);
     } catch (e) {
       console.error(e);
@@ -359,7 +373,7 @@
     if (!currentUser) return;
     const fb = window.__fb;
     try {
-      await fb.deleteDoc(fb.doc(fb.db, "users", currentUser.uid, "items", id));
+      await fb.deleteDoc(fb.doc(fb.db, "households", "pantry", "items", id));
     } catch (e) {
       console.error(e);
       toast("Couldn't remove item");
