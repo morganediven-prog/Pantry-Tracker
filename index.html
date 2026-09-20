@@ -153,6 +153,23 @@
     border-radius: 10px; padding: 12px 14px; font-size: 0.82rem; color: var(--muted);
     margin-top: 16px; max-width: 380px; line-height: 1.4;
   }
+
+  .search-sort-row {
+    display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;
+  }
+  .search-input {
+    flex: 1; min-width: 160px; padding: 9px 13px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+    font-size: 0.88rem; font-family: inherit;
+  }
+  .sort-toggle {
+    display: flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; flex-shrink: 0;
+  }
+  .sort-btn {
+    border: none; border-radius: 0; background: var(--card); color: var(--muted);
+    padding: 9px 12px; font-size: 0.82rem; white-space: nowrap;
+  }
+  .sort-btn.active { background: var(--accent); color: white; }
 </style>
 </head>
 <body>
@@ -183,6 +200,14 @@
     </div>
 
     <div class="filters" id="filters"></div>
+
+    <div class="search-sort-row">
+      <input type="text" id="searchInput" class="search-input" placeholder="Search items…">
+      <div class="sort-toggle" id="sortToggle">
+        <button class="sort-btn active" data-sort="expiry">Soonest expiring</button>
+        <button class="sort-btn" data-sort="alpha">A–Z</button>
+      </div>
+    </div>
 
     <div class="list" id="list"></div>
     <div class="empty" id="emptyState" style="display:none;">Nothing here yet — add your first item above.</div>
@@ -250,6 +275,8 @@
 
   let items = [];
   let activeFilter = "All";
+  let searchText = "";
+  let sortMode = "expiry"; // "expiry" | "alpha"
   let currentUser = null;
   let unsubscribeItems = null;
 
@@ -382,12 +409,21 @@
 
     let shown = items.slice();
     if (activeFilter !== "All") shown = shown.filter(i => i.category === activeFilter);
+    if (searchText.trim()) {
+      const q = searchText.trim().toLowerCase();
+      shown = shown.filter(i => i.name.toLowerCase().includes(q));
+    }
 
-    shown.sort((a, b) => {
-      const da = a.expiresOn ? daysUntil(a.expiresOn) : Infinity;
-      const db_ = b.expiresOn ? daysUntil(b.expiresOn) : Infinity;
-      return da - db_;
-    });
+    if (sortMode === "alpha") {
+      shown.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+    } else {
+      shown.sort((a, b) => {
+        const da = a.expiresOn ? daysUntil(a.expiresOn) : Infinity;
+        const db_ = b.expiresOn ? daysUntil(b.expiresOn) : Infinity;
+        if (da !== db_) return da - db_;
+        return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      });
+    }
 
     listEl.innerHTML = "";
     emptyEl.style.display = shown.length === 0 ? "block" : "none";
@@ -503,6 +539,16 @@
   }
 
   $("#addBtn").onclick = () => openAddSheet();
+
+  $("#searchInput").oninput = (e) => { searchText = e.target.value; render(); };
+  document.querySelectorAll(".sort-btn").forEach(btn => {
+    btn.onclick = () => {
+      sortMode = btn.dataset.sort;
+      document.querySelectorAll(".sort-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      render();
+    };
+  });
 
   // ---------- barcode scanning (ZXing — works in Safari/iOS Chrome too, not just Android/desktop) ----------
   const scanBtn = $("#scanBtn");
