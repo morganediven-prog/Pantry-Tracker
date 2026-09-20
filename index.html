@@ -239,6 +239,8 @@
   }
 </script>
 
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
+
 <script>
 (function() {
   "use strict";
@@ -502,9 +504,9 @@
 
   $("#addBtn").onclick = () => openAddSheet();
 
-  // ---------- barcode scanning ----------
+  // ---------- barcode scanning (ZXing — works in Safari/iOS Chrome too, not just Android/desktop) ----------
   const scanBtn = $("#scanBtn");
-  const hasBarcodeDetector = "BarcodeDetector" in window;
+  const hasZXing = typeof window.ZXing !== "undefined";
 
   async function lookupProduct(code) {
     // Self-hosted (GitHub Pages etc.) has no cross-origin restriction, so this
@@ -545,59 +547,46 @@
 
     const video = overlay.querySelector("#scanVideo");
     const statusEl = overlay.querySelector("#scanStatus");
-    let stream = null;
+    const codeReader = new ZXing.BrowserMultiFormatReader();
     let stopped = false;
 
     function cleanup() {
+      if (stopped) return;
       stopped = true;
-      if (stream) stream.getTracks().forEach(t => t.stop());
+      try { codeReader.reset(); } catch (e) {}
       overlay.remove();
     }
     overlay.querySelector("#scanCancel").onclick = cleanup;
     overlay.addEventListener("click", (e) => { if (e.target === overlay) cleanup(); });
 
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-      .then(async (s) => {
-        stream = s;
-        video.srcObject = s;
-        const detector = new window.BarcodeDetector({
-          formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "qr_code"]
+    codeReader.decodeFromConstraints(
+      { video: { facingMode: "environment" } },
+      video,
+      async (result) => {
+        if (stopped || !result) return;
+        const value = result.getText();
+        stopped = true;
+        statusEl.textContent = "Got it — looking up product…";
+        try { codeReader.reset(); } catch (e) {}
+        const productName = await lookupProduct(value);
+        overlay.remove();
+        openAddSheet({
+          name: productName || "",
+          barcode: value,
+          nameFromLookup: !!productName
         });
-
-        const loop = async () => {
-          if (stopped) return;
-          try {
-            const codes = await detector.detect(video);
-            if (codes && codes.length > 0) {
-              const value = codes[0].rawValue;
-              stopped = true;
-              statusEl.textContent = "Got it — looking up product…";
-              stream.getTracks().forEach(t => t.stop());
-              const productName = await lookupProduct(value);
-              overlay.remove();
-              openAddSheet({
-                name: productName || "",
-                barcode: value,
-                nameFromLookup: !!productName
-              });
-              return;
-            }
-          } catch (e) { /* detection miss, keep looping */ }
-          requestAnimationFrame(loop);
-        };
-        requestAnimationFrame(loop);
-      })
-      .catch((err) => {
-        statusEl.textContent = err.name === "NotAllowedError"
-          ? "Camera access denied"
-          : "Couldn't access the camera";
-        setTimeout(cleanup, 1500);
-      });
+      }
+    ).catch((err) => {
+      statusEl.textContent = err.name === "NotAllowedError"
+        ? "Camera access denied"
+        : "Couldn't access the camera";
+      setTimeout(cleanup, 1500);
+    });
   }
 
   scanBtn.onclick = () => {
-    if (!hasBarcodeDetector) {
-      toast("Barcode scanning isn't supported in this browser — try Chrome on Android or desktop");
+    if (!hasZXing) {
+      toast("Barcode scanner failed to load — check your connection and reload the page");
       return;
     }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
