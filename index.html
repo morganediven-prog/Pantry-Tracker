@@ -514,14 +514,17 @@
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 4000);
-      const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name`, {
+      const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,quantity`, {
         signal: controller.signal
       });
       clearTimeout(timeout);
       if (!res.ok) return null;
       const data = await res.json();
-      if (data && data.product && data.product.product_name) {
-        return data.product.product_name;
+      if (data && data.product && (data.product.product_name || data.product.quantity)) {
+        return {
+          name: data.product.product_name || null,
+          quantity: data.product.quantity || null
+        };
       }
       return null;
     } catch (e) {
@@ -568,12 +571,13 @@
         stopped = true;
         statusEl.textContent = "Got it — looking up product…";
         try { codeReader.reset(); } catch (e) {}
-        const productName = await lookupProduct(value);
+        const product = await lookupProduct(value);
         overlay.remove();
         openAddSheet({
-          name: productName || "",
+          name: (product && product.name) || "",
+          quantity: (product && product.quantity) || "",
           barcode: value,
-          nameFromLookup: !!productName
+          nameFromLookup: !!(product && product.name)
         });
       }
     ).catch((err) => {
