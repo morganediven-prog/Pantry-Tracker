@@ -560,19 +560,26 @@
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 4000);
-      const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,quantity`, {
+      const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,quantity,product_quantity,product_quantity_unit`, {
         signal: controller.signal
       });
       clearTimeout(timeout);
       if (!res.ok) return null;
       const data = await res.json();
-      if (data && data.product && (data.product.product_name || data.product.quantity)) {
-        return {
-          name: data.product.product_name || null,
-          quantity: data.product.quantity || null
-        };
+      const p = data && data.product;
+      if (!p) return null;
+
+      let quantity = p.quantity || null;
+      // "quantity" (free-text, e.g. "500 g") is often left blank even when the
+      // more structured product_quantity (a plain number) is filled in — fall
+      // back to that, with its unit if given (grams if unspecified).
+      if (!quantity && p.product_quantity) {
+        const unit = p.product_quantity_unit || "g";
+        quantity = `${p.product_quantity} ${unit}`;
       }
-      return null;
+
+      if (!p.product_name && !quantity) return null;
+      return { name: p.product_name || null, quantity };
     } catch (e) {
       return null;
     }
