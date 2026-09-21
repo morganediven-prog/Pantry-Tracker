@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pantry &amp; Fridge Tracker</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#3f7d5c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Pantry Tracker">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
 <style>
   :root {
     --bg: #f7f5f0;
@@ -170,6 +177,34 @@
     padding: 9px 12px; font-size: 0.82rem; white-space: nowrap;
   }
   .sort-btn.active { background: var(--accent); color: white; }
+
+  .item .low-toggle {
+    background: none; border: none; color: var(--muted); font-size: 1rem;
+    padding: 4px 8px; flex-shrink: 0; border-radius: 8px;
+  }
+  .item .low-toggle.active { background: var(--chip-bg); color: var(--warn); }
+  .low-tag { color: var(--warn); font-weight: 600; }
+
+  .btn-shopping {
+    background: var(--card); color: var(--text); border-color: var(--border); font-weight: 600;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .btn-shopping.active { background: var(--warn); color: white; border-color: var(--warn); }
+  .count-badge {
+    background: rgba(0,0,0,0.15); border-radius: 999px; padding: 1px 7px; font-size: 0.75rem;
+  }
+
+  .undo-toast { pointer-events: auto; display: flex; align-items: center; gap: 14px; }
+  .undo-toast .undo-btn {
+    background: transparent; border: none; color: white; font-weight: 700;
+    text-decoration: underline; padding: 0; font-size: 0.85rem;
+  }
+
+  .member-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 6px 0; font-size: 0.88rem;
+  }
+  .member-row button { padding: 5px 10px; font-size: 0.78rem; }
 </style>
 </head>
 <body>
@@ -181,6 +216,7 @@
     </div>
     <div class="account" id="accountBox" style="display:none;">
       <div id="accountEmail"></div>
+      <button id="manageHouseholdBtn">👪 Household</button>
       <button id="signOutBtn">Sign out</button>
     </div>
   </header>
@@ -197,6 +233,7 @@
       <button class="btn-mic" id="micBtn">🎤 Add by voice</button>
       <button class="btn-mic" id="scanBtn">📷 Scan barcode</button>
       <button class="btn-primary" id="addBtn">+ Add item</button>
+      <button class="btn-shopping" id="shoppingToggleBtn">🛒 Shopping list<span class="count-badge" id="shoppingCount" style="display:none;"></span></button>
     </div>
 
     <div class="filters" id="filters"></div>
@@ -206,6 +243,7 @@
       <div class="sort-toggle" id="sortToggle">
         <button class="sort-btn active" data-sort="expiry">Soonest expiring</button>
         <button class="sort-btn" data-sort="alpha">A–Z</button>
+        <button class="sort-btn" data-sort="recent">Recently added</button>
       </div>
     </div>
 
@@ -229,7 +267,8 @@
     getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut
   } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
   import {
-    getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query
+    getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc,
+    onSnapshot, query, arrayUnion, arrayRemove
   } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
 
   // ======================= PASTE YOUR CONFIG HERE =======================
@@ -258,7 +297,8 @@
     const db = getFirestore(app);
     window.__fb = {
       auth, db, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut,
-      collection, addDoc, deleteDoc, doc, onSnapshot, query
+      collection, addDoc, updateDoc, deleteDoc, doc, getDoc, onSnapshot, query,
+      arrayUnion, arrayRemove
     };
     window.dispatchEvent(new Event("firebase-ready"));
   }
@@ -276,13 +316,12 @@
   let items = [];
   let activeFilter = "All";
   let searchText = "";
-  let sortMode = "expiry"; // "expiry" | "alpha"
+  let sortMode = "expiry"; // "expiry" | "alpha" | "recent"
+  let view = "pantry"; // "pantry" | "shopping"
   let currentUser = null;
   let unsubscribeItems = null;
-
-  // Only these Google accounts can view/edit the shared list. This is just for
-  // a clean UI message — the real enforcement is in the Firestore security rules.
-  const ALLOWED_EMAILS = ["morgane.diven@gmail.com", "cdiven@gmail.com"];
+  let hiddenIds = new Set(); // items pending an "undo" delete
+  let pendingDeleteTimers = new Map();
 
   const $ = (sel) => document.querySelector(sel);
   const listEl = $("#list");
@@ -301,6 +340,16 @@
     setTimeout(() => toastEl.classList.remove("show"), 1800);
   }
 
+  function showUndoToast(message, onUndo) {
+    const el = document.createElement("div");
+    el.className = "toast undo-toast show";
+    el.innerHTML = `<span></span><button class="undo-btn">Undo</button>`;
+    el.querySelector("span").textContent = message;
+    document.body.appendChild(el);
+    el.querySelector(".undo-btn").onclick = () => { onUndo(); el.remove(); };
+    setTimeout(() => { if (el.parentNode) el.remove(); }, 4200);
+  }
+
   // ---------- Firebase bridge ----------
   function whenFirebaseReady(cb) {
     if (window.__fb) { cb(window.__fb); return; }
@@ -308,11 +357,33 @@
   }
 
   whenFirebaseReady((fb) => {
-    fb.onAuthStateChanged(fb.auth, (user) => {
+    fb.onAuthStateChanged(fb.auth, async (user) => {
       currentUser = user;
       if (unsubscribeItems) { unsubscribeItems(); unsubscribeItems = null; }
 
-      if (user && !ALLOWED_EMAILS.includes(user.email)) {
+      if (!user) {
+        signinScreen.style.display = "flex";
+        appScreen.style.display = "none";
+        accountBox.style.display = "none";
+        subhead.textContent = "Not signed in";
+        items = [];
+        return;
+      }
+
+      // Household membership lives in Firestore (households/pantry/meta/access,
+      // field allowedEmails) instead of being hardcoded here, so it can be
+      // managed from the app itself. Firestore rules are the real gatekeeper —
+      // this read simply fails for anyone not on the list.
+      let authorized = false;
+      try {
+        const accessSnap = await fb.getDoc(fb.doc(fb.db, "households", "pantry", "meta", "access"));
+        const allowed = (accessSnap.exists() && accessSnap.data().allowedEmails) || [];
+        authorized = allowed.includes(user.email);
+      } catch (e) {
+        authorized = false;
+      }
+
+      if (!authorized) {
         fb.signOut(fb.auth);
         signinScreen.style.display = "flex";
         appScreen.style.display = "none";
@@ -322,28 +393,20 @@
         return;
       }
 
-      if (user) {
-        signinScreen.style.display = "none";
-        appScreen.style.display = "block";
-        accountBox.style.display = "block";
-        accountEmail.textContent = user.email || user.displayName || "Signed in";
-        subhead.textContent = "Shared family list — synced to Firebase";
+      signinScreen.style.display = "none";
+      appScreen.style.display = "block";
+      accountBox.style.display = "block";
+      accountEmail.textContent = user.email || user.displayName || "Signed in";
+      subhead.textContent = "Shared family list — synced to Firebase";
 
-        const itemsCol = fb.collection(fb.db, "households", "pantry", "items");
-        unsubscribeItems = fb.onSnapshot(fb.query(itemsCol), (snap) => {
-          items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-          render();
-        }, (err) => {
-          console.error("Firestore listen error:", err);
-          toast("Couldn't load your list — check Firestore rules");
-        });
-      } else {
-        signinScreen.style.display = "flex";
-        appScreen.style.display = "none";
-        accountBox.style.display = "none";
-        subhead.textContent = "Not signed in";
-        items = [];
-      }
+      const itemsCol = fb.collection(fb.db, "households", "pantry", "items");
+      unsubscribeItems = fb.onSnapshot(fb.query(itemsCol), (snap) => {
+        items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        render();
+      }, (err) => {
+        console.error("Firestore listen error:", err);
+        toast("Couldn't load your list — check Firestore rules");
+      });
     });
 
     $("#signInBtn").onclick = () => {
@@ -354,6 +417,7 @@
       });
     };
     $("#signOutBtn").onclick = () => { fb.signOut(fb.auth); };
+    $("#manageHouseholdBtn").onclick = () => openManageHousehold();
   });
 
   async function addItem(item) {
@@ -378,6 +442,126 @@
       console.error(e);
       toast("Couldn't remove item");
     }
+  }
+
+  // Deletes are staged for a few seconds so they can be undone, instead of
+  // hitting Firestore immediately.
+  function requestDelete(item) {
+    hiddenIds.add(item.id);
+    render();
+    const timerId = setTimeout(() => {
+      hiddenIds.delete(item.id);
+      pendingDeleteTimers.delete(item.id);
+      deleteItem(item.id);
+    }, 4000);
+    pendingDeleteTimers.set(item.id, timerId);
+    showUndoToast(`Removed ${item.name}`, () => {
+      clearTimeout(pendingDeleteTimers.get(item.id));
+      pendingDeleteTimers.delete(item.id);
+      hiddenIds.delete(item.id);
+      render();
+    });
+  }
+
+  async function updateItem(id, changes) {
+    if (!currentUser) return;
+    const fb = window.__fb;
+    try {
+      await fb.updateDoc(fb.doc(fb.db, "households", "pantry", "items", id), changes);
+    } catch (e) {
+      console.error(e);
+      toast("Couldn't update item");
+    }
+  }
+
+  async function toggleLow(item) {
+    if (!currentUser) return;
+    const fb = window.__fb;
+    try {
+      await fb.updateDoc(fb.doc(fb.db, "households", "pantry", "items", item.id), { low: !item.low });
+    } catch (e) {
+      console.error(e);
+      toast("Couldn't update item");
+    }
+  }
+
+  // ---------- manage household ----------
+  function openManageHousehold() {
+    if (!currentUser) return;
+    const fb = window.__fb;
+    const accessRef = fb.doc(fb.db, "households", "pantry", "meta", "access");
+
+    const overlay = document.createElement("div");
+    overlay.className = "overlay";
+    overlay.innerHTML = `
+      <div class="sheet">
+        <h2>Manage household</h2>
+        <div class="field">
+          <label>People with access</label>
+          <div id="memberList"></div>
+        </div>
+        <div class="field">
+          <label>Add someone (their Google account email)</label>
+          <input type="email" id="newMemberEmail" placeholder="name@gmail.com">
+        </div>
+        <div class="sheet-actions">
+          <button id="mh_close">Close</button>
+          <button class="btn-primary" id="mh_add">Add</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    let currentEmails = [];
+    const memberListEl = overlay.querySelector("#memberList");
+
+    function renderMembers() {
+      memberListEl.innerHTML = currentEmails.map(email => `
+        <div class="member-row">
+          <span>${escapeHtml(email)}</span>
+          <button class="mh-remove" data-email="${escapeHtml(email)}">Remove</button>
+        </div>
+      `).join("") || `<div style="color:var(--muted); font-size:0.85rem;">No members yet.</div>`;
+      memberListEl.querySelectorAll(".mh-remove").forEach(btn => {
+        btn.onclick = () => removeMember(btn.dataset.email);
+      });
+    }
+
+    const liveUnsub = fb.onSnapshot(accessRef, (snap) => {
+      currentEmails = (snap.exists() && snap.data().allowedEmails) || [];
+      renderMembers();
+    }, (err) => {
+      console.error(err);
+    });
+
+    async function removeMember(email) {
+      if (currentEmails.length <= 1) { toast("A household needs at least one member"); return; }
+      try {
+        await fb.updateDoc(accessRef, { allowedEmails: fb.arrayRemove(email) });
+        toast(`Removed ${email}`);
+      } catch (e) {
+        console.error(e);
+        toast("Couldn't remove — check Firestore rules");
+      }
+    }
+
+    function close() { liveUnsub(); overlay.remove(); }
+    overlay.querySelector("#mh_close").onclick = close;
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+    overlay.querySelector("#mh_add").onclick = async () => {
+      const input = overlay.querySelector("#newMemberEmail");
+      const email = input.value.trim().toLowerCase();
+      if (!email || !email.includes("@") || !email.includes(".")) { input.focus(); return; }
+      try {
+        await fb.updateDoc(accessRef, { allowedEmails: fb.arrayUnion(email) });
+        input.value = "";
+        toast(`Added ${email}`);
+      } catch (e) {
+        console.error(e);
+        toast("Couldn't add — check Firestore rules");
+      }
+    };
   }
 
   // ---------- date helpers ----------
@@ -421,15 +605,18 @@
       filtersEl.appendChild(chip);
     });
 
-    let shown = items.slice();
+    let shown = items.slice().filter(i => !hiddenIds.has(i.id));
     if (activeFilter !== "All") shown = shown.filter(i => i.category === activeFilter);
     if (searchText.trim()) {
       const q = searchText.trim().toLowerCase();
       shown = shown.filter(i => i.name.toLowerCase().includes(q));
     }
+    if (view === "shopping") shown = shown.filter(i => i.low);
 
     if (sortMode === "alpha") {
       shown.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+    } else if (sortMode === "recent") {
+      shown.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
     } else {
       shown.sort((a, b) => {
         const da = a.expiresOn ? daysUntil(a.expiresOn) : Infinity;
@@ -441,10 +628,21 @@
 
     listEl.innerHTML = "";
     emptyEl.style.display = shown.length === 0 ? "block" : "none";
+    emptyEl.textContent = view === "shopping"
+      ? "Nothing marked as low right now — tap the 🛒 on any item to add it here."
+      : "Nothing here yet — add your first item above.";
+
+    const lowCount = items.filter(i => i.low).length;
+    const countBadge = document.getElementById("shoppingCount");
+    if (countBadge) {
+      countBadge.style.display = lowCount > 0 ? "inline-block" : "none";
+      countBadge.textContent = lowCount;
+    }
 
     shown.forEach(it => {
       const row = document.createElement("div");
       row.className = "item";
+      row.style.cursor = "pointer";
       const exp = fmtExpiry(it.expiresOn);
       row.innerHTML = `
         <div class="dot ${dotClassFor(it.expiresOn)}"></div>
@@ -453,11 +651,15 @@
           <div class="meta">
             <span class="cat-tag">${CATEGORY_ICON[it.category] || ""} ${escapeHtml(it.category)}</span>
             <span class="exp-text ${exp.cls}">${exp.text}</span>
+            ${it.low ? `<span class="low-tag">🛒 Low</span>` : ""}
           </div>
         </div>
-        <button class="del" title="Remove" data-id="${it.id}">✕</button>
+        <button class="low-toggle ${it.low ? "active" : ""}" title="${it.low ? "Remove from shopping list" : "Mark as running low"}">🛒</button>
+        <button class="del" title="Remove">✕</button>
       `;
-      row.querySelector(".del").onclick = () => deleteItem(it.id);
+      row.onclick = () => openAddSheet(it, it.id);
+      row.querySelector(".low-toggle").onclick = (e) => { e.stopPropagation(); toggleLow(it); };
+      row.querySelector(".del").onclick = (e) => { e.stopPropagation(); requestDelete(it); };
       listEl.appendChild(row);
     });
   }
@@ -466,13 +668,13 @@
     return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   }
 
-  // ---------- add sheet ----------
-  function openAddSheet(prefill) {
+  // ---------- add / edit sheet ----------
+  function openAddSheet(prefill, editId) {
     const overlay = document.createElement("div");
     overlay.className = "overlay";
     overlay.innerHTML = `
       <div class="sheet">
-        <h2>Add item</h2>
+        <h2>${editId ? "Edit item" : "Add item"}</h2>
         <div class="field">
           <label>Name</label>
           <input type="text" id="f_name" placeholder="e.g. Milk, Leftover chili, Apples">
@@ -501,7 +703,7 @@
         </div>
         <div class="sheet-actions">
           <button id="f_cancel">Cancel</button>
-          <button class="btn-primary" id="f_save">Save</button>
+          <button class="btn-primary" id="f_save">${editId ? "Save changes" : "Save"}</button>
         </div>
       </div>
     `;
@@ -519,7 +721,7 @@
       if (prefill.category) catSelect.value = prefill.category;
       if (prefill.quantity) qtyInput.value = prefill.quantity;
       if (prefill.expiresOn) expInput.value = prefill.expiresOn;
-      if (prefill.barcode) {
+      if (prefill.barcode && !editId) {
         pendingBarcode = prefill.barcode;
         barcodeTag.style.display = "block";
         barcodeTag.textContent = prefill.nameFromLookup
@@ -538,21 +740,33 @@
     overlay.querySelector("#f_save").onclick = () => {
       const name = nameInput.value.trim();
       if (!name) { nameInput.focus(); return; }
-      addItem({
+      const payload = {
         name,
         category: catSelect.value,
         quantity: qtyInput.value.trim(),
-        expiresOn: expInput.value || null,
-        barcode: pendingBarcode || null
-      });
+        expiresOn: expInput.value || null
+      };
+      if (editId) {
+        updateItem(editId, payload);
+        toast(`Updated ${name}`);
+      } else {
+        payload.barcode = pendingBarcode || null;
+        addItem(payload);
+        toast(`Added ${name}`);
+      }
       overlay.remove();
-      toast(`Added ${name}`);
     };
 
     setTimeout(() => nameInput.focus(), 50);
   }
 
   $("#addBtn").onclick = () => openAddSheet();
+
+  $("#shoppingToggleBtn").onclick = () => {
+    view = view === "shopping" ? "pantry" : "shopping";
+    $("#shoppingToggleBtn").classList.toggle("active", view === "shopping");
+    render();
+  };
 
   $("#searchInput").oninput = (e) => { searchText = e.target.value; render(); };
   document.querySelectorAll(".sort-btn").forEach(btn => {
