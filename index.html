@@ -205,6 +205,12 @@
     padding: 6px 0; font-size: 0.88rem;
   }
   .member-row button { padding: 5px 10px; font-size: 0.78rem; }
+
+  .checkbox-field {
+    display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 0 !important;
+  }
+  .checkbox-field input[type="checkbox"] { width: auto; accent-color: var(--accent); }
+  .opened-tag { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -609,7 +615,7 @@
     if (activeFilter !== "All") shown = shown.filter(i => i.category === activeFilter);
     if (searchText.trim()) {
       const q = searchText.trim().toLowerCase();
-      shown = shown.filter(i => i.name.toLowerCase().includes(q));
+      shown = shown.filter(i => i.name.toLowerCase().includes(q) || (i.brand || "").toLowerCase().includes(q));
     }
     if (view === "shopping") shown = shown.filter(i => i.low);
 
@@ -647,10 +653,11 @@
       row.innerHTML = `
         <div class="dot ${dotClassFor(it.expiresOn)}"></div>
         <div class="info">
-          <div class="name">${escapeHtml(it.name)}${it.quantity ? ` <span style="color:var(--muted); font-weight:400;">× ${escapeHtml(it.quantity)}</span>` : ""}</div>
+          <div class="name">${it.brand ? `<span style="color:var(--muted); font-weight:400;">${escapeHtml(it.brand)} · </span>` : ""}${escapeHtml(it.name)}${it.quantity ? ` <span style="color:var(--muted); font-weight:400;">× ${escapeHtml(it.quantity)}</span>` : ""}</div>
           <div class="meta">
             <span class="cat-tag">${CATEGORY_ICON[it.category] || ""} ${escapeHtml(it.category)}</span>
             <span class="exp-text ${exp.cls}">${exp.text}</span>
+            ${it.opened ? `<span class="opened-tag">📦 Opened</span>` : ""}
             ${it.low ? `<span class="low-tag">🛒 Low</span>` : ""}
           </div>
         </div>
@@ -681,6 +688,10 @@
           <div class="barcode-tag" id="f_barcode_tag" style="display:none; margin-top:4px;"></div>
         </div>
         <div class="field">
+          <label>Brand (optional)</label>
+          <input type="text" id="f_brand" placeholder="e.g. Kirkland, Horizon Organic">
+        </div>
+        <div class="field">
           <label>Category</label>
           <select id="f_cat">
             ${CATEGORIES.map(c => `<option value="${c}">${CATEGORY_ICON[c]} ${c}</option>`).join("")}
@@ -701,6 +712,12 @@
             <button type="button" data-d="30">+1 month</button>
           </div>
         </div>
+        <div class="field">
+          <label class="checkbox-field">
+            <input type="checkbox" id="f_opened">
+            <span>Opened / in use</span>
+          </label>
+        </div>
         <div class="sheet-actions">
           <button id="f_cancel">Cancel</button>
           <button class="btn-primary" id="f_save">${editId ? "Save changes" : "Save"}</button>
@@ -710,17 +727,21 @@
     document.body.appendChild(overlay);
 
     const nameInput = overlay.querySelector("#f_name");
+    const brandInput = overlay.querySelector("#f_brand");
     const catSelect = overlay.querySelector("#f_cat");
     const qtyInput = overlay.querySelector("#f_qty");
     const expInput = overlay.querySelector("#f_exp");
+    const openedInput = overlay.querySelector("#f_opened");
     const barcodeTag = overlay.querySelector("#f_barcode_tag");
     let pendingBarcode = null;
 
     if (prefill) {
       nameInput.value = prefill.name || "";
+      brandInput.value = prefill.brand || "";
       if (prefill.category) catSelect.value = prefill.category;
       if (prefill.quantity) qtyInput.value = prefill.quantity;
       if (prefill.expiresOn) expInput.value = prefill.expiresOn;
+      openedInput.checked = !!prefill.opened;
       if (prefill.barcode && !editId) {
         pendingBarcode = prefill.barcode;
         barcodeTag.style.display = "block";
@@ -742,9 +763,11 @@
       if (!name) { nameInput.focus(); return; }
       const payload = {
         name,
+        brand: brandInput.value.trim(),
         category: catSelect.value,
         quantity: qtyInput.value.trim(),
-        expiresOn: expInput.value || null
+        expiresOn: expInput.value || null,
+        opened: openedInput.checked
       };
       if (editId) {
         updateItem(editId, payload);
@@ -788,7 +811,7 @@
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 4000);
-      const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,quantity,product_quantity,product_quantity_unit`, {
+      const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,quantity,product_quantity,product_quantity_unit,brands`, {
         signal: controller.signal
       });
       clearTimeout(timeout);
@@ -805,9 +828,11 @@
         const unit = p.product_quantity_unit || "g";
         quantity = `${p.product_quantity} ${unit}`;
       }
+      // "brands" can be a comma-separated list — just take the first.
+      const brand = p.brands ? p.brands.split(",")[0].trim() : null;
 
-      if (!p.product_name && !quantity) return null;
-      return { name: p.product_name || null, quantity };
+      if (!p.product_name && !quantity && !brand) return null;
+      return { name: p.product_name || null, quantity, brand };
     } catch (e) {
       return null;
     }
@@ -857,6 +882,7 @@
         openAddSheet({
           name: (product && product.name) || "",
           quantity: (product && product.quantity) || "",
+          brand: (product && product.brand) || "",
           barcode: value,
           nameFromLookup: !!(product && product.name)
         });
